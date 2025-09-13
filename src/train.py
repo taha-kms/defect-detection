@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from src.utils import env
 from src.mvtec_ad.dataset import MVTecDataset
 from src.mvtec_ad import transforms as T
-from src.models import PaDiMModel, PatchCoreModel, AEModel
+from src.models import PaDiMModel, PatchCoreModel, AEModel, FastFlowModel
 
 
 def get_model(model_name: str, device: str):
@@ -17,8 +17,9 @@ def get_model(model_name: str, device: str):
         return PatchCoreModel(backbone=env.BACKBONE, device=device)
     elif model_name.lower() == "ae":
         return AEModel(device=device)
-    else:
-        raise ValueError(f"Unknown model: {model_name}")
+    if model_name.lower() == "fastflow":
+        return FastFlowModel(backbone=env.BACKBONE, device=device)
+    raise ValueError(f"Unknown model: {model_name}")
 
 
 def train(model_name: str, class_name: str, batch_size: int, num_workers: int, device: str, output_dir: Path, epochs: int = 30, lr: float = 1e-3):
@@ -41,22 +42,38 @@ def train(model_name: str, class_name: str, batch_size: int, num_workers: int, d
 
     if model_name.lower() in {"padim", "patchcore"}:
         model.fit(train_loader)
-    else:
-        # Standard AE training
+    elif model_name.lower() == "ae":
         model.train()
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        for epoch in range(1, epochs + 1):
+        opt = torch.optim.Adam(model.parameters(), lr=lr)
+        for ep in range(1, epochs + 1):
             epoch_loss = 0.0
             for imgs, _, _, _ in train_loader:
                 imgs = imgs.to(device)
-                optimizer.zero_grad()
+                opt.zero_grad()
                 recon = model.net(imgs)
-                loss, ssim_val, mse_val = model.loss_fn(imgs, recon)
+                loss, _, _ = model.loss_fn(imgs, recon)
                 loss.backward()
-                optimizer.step()
+                opt.step()
                 epoch_loss += loss.item() * imgs.size(0)
-            epoch_loss /= len(train_loader.dataset)
-            print(f"[AE] epoch {epoch}/{epochs} | loss={epoch_loss:.4f}")
+            print(f"[AE] epoch {ep}/{epochs} | loss={epoch_loss/len(train_loader.dataset):.4f}")
+
+    elif model_name.lower() == "fastflow":
+        
+        opt = torch.optim.Adam(model.parameters(), lr=lr)
+        for ep in range(1, epochs + 1):
+            model.train()
+            epoch_loss = 0.0
+            for imgs, _, _, _ in train_loader:
+                opt.zero_grad()
+                loss = model.training_step(imgs)
+                loss.backward()
+                opt.step()
+                epoch_loss += loss.item() * imgs.size(0)
+            print(f"[FastFlow] epoch {ep}/{epochs} | nll={epoch_loss/len(train_loader.dataset):.4f}")
+    else:
+        raise ValueError("Unsupported model")
+
+
 
     # Save model
     save_path = output_dir / f"{model_name}_{class_name}.pt"
@@ -68,7 +85,7 @@ def train(model_name: str, class_name: str, batch_size: int, num_workers: int, d
 
 def main():
     parser = argparse.ArgumentParser(description="Train anomaly detection models on MVTec AD")
-    parser.add_argument("--model", choices=["padim", "patchcore", "ae"], required=True)
+    parser.add_argument("--model", choices=["padim", "patchcore", "ae", "fastflow"], required=True)
     parser.add_argument("--class_name", required=True)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=int(env.NUM_WORKERS))

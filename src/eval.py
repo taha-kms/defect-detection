@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from src.utils import env, metrics, visualization
 from src.mvtec_ad.dataset import MVTecDataset
 from src.mvtec_ad import transforms as T
-from src.models import PaDiMModel, PatchCoreModel, AEModel
+from src.models import PaDiMModel, PatchCoreModel, AEModel, FastFlowModel
 
 
 def load_model(model_name: str, class_name: str, device: str):
@@ -19,6 +19,8 @@ def load_model(model_name: str, class_name: str, device: str):
         model = PatchCoreModel(backbone=env.BACKBONE, device=device)
     elif model_name == "ae":
         model = AEModel(device=device)
+    elif model_name == "fastflow":
+        model = FastFlowModel(backbone=env.BACKBONE, device=device)
     else:
         raise ValueError("Unknown model")
     
@@ -90,7 +92,7 @@ def evaluate(model_name: str, class_name: str, batch_size: int, num_workers: int
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate trained anomaly detection models")
-    parser.add_argument("--model", choices=["padim", "patchcore", "ae"], required=True)
+    parser.add_argument("--model", choices=["padim", "patchcore", "ae", "fastflow"], required=True)
     parser.add_argument("--class_name", required=True, help="MVTec class name")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=int(env.NUM_WORKERS))
