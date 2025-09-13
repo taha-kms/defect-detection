@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,15 +25,15 @@ class FeatureExtractor(nn.Module):
             backbone_model.layer1,
         )
         self.feature_extractor["layer2"] = backbone_model.layer2
-        self.featureExtractor3 = backbone_model.layer3
+        self.feature_extractor["layer3"] = backbone_model.layer3
 
     def forward(self, x: Tensor):
         feats = {}
-        x = self.featureExtractor["layer1"](x)
+        x = self.feature_extractor["layer1"](x)
         feats["layer1"] = x
-        x = self.featureExtractor["layer2"](x)
+        x = self.feature_extractor["layer2"](x)
         feats["layer2"] = x
-        x = self.featureExtractor3(x)
+        x = self.feature_extractor["layer3"](x)
         feats["layer3"] = x
         return feats
 
