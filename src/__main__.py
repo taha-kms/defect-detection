@@ -1,18 +1,42 @@
-from importlib import import_module
+from __future__ import annotations
 import sys
 
-COMMANDS = {"prepare", "train", "test", "eval", "report"}
 
-def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
-        print("Usage: python -m src <prepare|train|test|eval|report> [args]")
-        sys.exit(1)
+# COMMANDS = {"prepare", "train", "test", "eval", "report"}
 
-    cmd = sys.argv[1]
-    module = import_module(f"src.cli.{cmd}")
-    module.main()
+def _die(msg: str, code: int = 2) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if not argv:
+        _die(
+            "Usage: python -m src <train|eval|report> [args]\n"
+            "Examples:\n"
+            "  python -m src train  --help\n"
+            "  python -m src eval   --help\n"
+            "  python -m src report --help"
+        )
+
+    cmd, *rest = argv
+
+    if cmd == "train":
+        from src import train as _train
+        # If src.train.main accepts argv, pass it; otherwise call without and let it read sys.argv.
+        return int(_train.main(rest) if hasattr(_train, "main") else _train.main())
+
+    if cmd == "eval":
+        from src import eval as _eval  # noqa: A001
+        return int(_eval.main(rest) if hasattr(_eval, "main") else _eval.main())
+
+    if cmd == "report":
+        from src.reporting import report as _report
+        return int(_report.main(rest) if hasattr(_report, "main") else _report.main())
+
+    _die(f"Unknown subcommand: {cmd!r}\nExpected one of: train, eval, report")
 
 if __name__ == "__main__":
-    main()
-
-    
+    sys.exit(main())
