@@ -44,14 +44,14 @@ def main():
     parser.add_argument("--list-classes", action="store_true", help="List classes found under DATA_DIR/mvtec_ad")
     args = parser.parse_args()
 
-    data_root = env.DATA_DIR / "mvtec_ad"
+    data_root = env.DATA_DIR
     print(f"DATA_DIR: {env.DATA_DIR}")
     print(f"Looking for MVTec AD at: {data_root}")
 
     if args.list_classes:
         found = _find_available_classes(data_root)
         if not found:
-            print("No classes found. Ensure dataset is extracted to data/mvtec_ad/<class>/ ...")
+            print("No classes found. Ensure dataset is extracted to data/<class>/ ...")
             return
         print("Classes available:", ", ".join(found))
         return

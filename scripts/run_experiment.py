@@ -23,28 +23,24 @@ def main():
     parser.add_argument("--extra", nargs="*", default=[])
     args = parser.parse_args()
 
+
     for model in args.models:
         for cls in args.classes:
             # Train
             run([
-                sys.executable, 
-                "-m", 
-                "src.train",
-                "--model", model, 
+                sys.executable, "-m", "src.train",
+                "--model", model,
                 "--class_name", cls,
-                "--config", args.config, *sum([["--extra", e] for e in args.extra], []),
-                "--batch_size", str(args.batch_size),
-                "--num_workers", str(args.num_workers)
+                "--config", args.config,
+                *sum([["--extra", e] for e in args.extra], []),
             ])
             # Evaluate
             run([
-                "-m", 
-                "src.eval",
-                "--model", model, 
+                sys.executable, "-m", "src.eval",
+                "--model", model,
                 "--class_name", cls,
-                "--config", args.config, *sum([["--extra", e] for e in args.extra], []),
-                "--batch_size", str(args.batch_size),
-                "--num_workers", str(args.num_workers)
+                "--config", args.config,
+                *sum([["--extra", e] for e in args.extra], []),
             ])
 
     print("All runs completed.")
