@@ -108,8 +108,8 @@ class PaDiMModel(nn.Module):
         B, C, H, W = emb.shape
         emb = emb.permute(0, 2, 3, 1).reshape(-1, C)  # [B*H*W, C]
 
-        mean = torch.from_numpy(self.means).to(self.device)
-        cov_inv = torch.from_numpy(self.covs_inv).to(self.device)
+        mean = torch.from_numpy(self.means).to(self.device).to(emb.dtype)
+        cov_inv = torch.from_numpy(self.covs_inv).to(self.device).to(emb.dtype)
 
         diffs = emb - mean
         # Mahalanobis distance squared
