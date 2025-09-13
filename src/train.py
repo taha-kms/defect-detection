@@ -5,40 +5,55 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.utils import env
+from src.utils.config import load_config
 from src.mvtec_ad.dataset import MVTecDataset
 from src.mvtec_ad import transforms as T
 from src.models import PaDiMModel, PatchCoreModel, AEModel, FastFlowModel
 
 
-def get_model(model_name: str, device: str):
-    if model_name.lower() == "padim":
-        return PaDiMModel(backbone=env.BACKBONE, device=device)
-    elif model_name.lower() == "patchcore":
-        return PatchCoreModel(backbone=env.BACKBONE, device=device)
-    elif model_name.lower() == "ae":
-        return AEModel(device=device)
-    if model_name.lower() == "fastflow":
-        return FastFlowModel(backbone=env.BACKBONE, device=device)
+def get_model(model_name: str, device: str, cfg: dict):
+    m = model_name.lower()
+    bb = cfg.get("backbone", {}).get("name", env.BACKBONE)
+    if m == "padim":
+        layers = cfg.get("models", {}).get("padim", {}).get("layers", ["layer1", "layer2", "layer3"])
+        return PaDiMModel(backbone=bb, device=device)  # simplified PaDiM ignores layers in our stub
+    if m == "patchcore":
+        return PatchCoreModel(backbone=bb, device=device)
+    if m == "ae":
+        base_ch = cfg.get("models", {}).get("ae", {}).get("base_ch", 32)
+        return AEModel(base_ch=base_ch, device=device)
+    if m == "fastflow":
+        ff = cfg.get("models", {}).get("fastflow", {})
+        layers = ff.get("layers", ["layer2", "layer3"])
+        num_blocks = ff.get("num_blocks", 4)
+        hidden = ff.get("hidden", 256)
+        return FastFlowModel(backbone=bb, device=device, layers=layers, num_blocks=num_blocks, hidden=hidden)
     raise ValueError(f"Unknown model: {model_name}")
 
 
-def train(model_name: str, class_name: str, batch_size: int, num_workers: int, device: str, output_dir: Path, epochs: int = 30, lr: float = 1e-3):
-    # Dataset + Loader
-    transform = T.get_image_transform(image_size=env.IMAGE_SIZE)
-    mask_transform = T.get_mask_transform(image_size=env.IMAGE_SIZE)
+def train(model_name: str, class_name: str, cfg: dict):
+    # Resolve params (env acts as fallback)
+    device = env.DEVICE if torch.cuda.is_available() or env.DEVICE == "cpu" else "cpu"
+    bs = cfg.get("train", {}).get("batch_size", 16)
+    nw = cfg.get("train", {}).get("num_workers", int(env.NUM_WORKERS))
+    epochs = cfg.get("train", {}).get("epochs", 30)
+    lr = cfg.get("train", {}).get("lr", 1e-3)
 
-    train_dataset = MVTecDataset(
-        root=env.DATA_DIR,
-        class_name=class_name,
-        split="train",
-        transform=transform,
-        mask_transform=mask_transform,
-    )
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    im_size = cfg.get("data", {}).get("image_size", env.IMAGE_SIZE)
+    center_crop = cfg.get("data", {}).get("center_crop", im_size)
+
+    # Data
+    transform = T.get_image_transform(image_size=im_size, center_crop=center_crop)
+    mask_transform = T.get_mask_transform(image_size=im_size, center_crop=center_crop)
+    train_dataset = MVTecDataset(root=env.DATA_DIR, class_name=class_name, split="train",
+                                 transform=transform, mask_transform=mask_transform)
+    train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, num_workers=nw)
 
     # Model
-    model = get_model(model_name, device)
-    print(f"Training {model_name} on class '{class_name}' with {len(train_dataset)} samples")
+    output_dir = env.RUNS_DIR / model_name / class_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model = get_model(model_name, device, cfg)
+    print(f"🚀 Training {model_name} on '{class_name}' (bs={bs}, epochs={epochs}, lr={lr})")
 
     if model_name.lower() in {"padim", "patchcore"}:
         model.fit(train_loader)
@@ -56,9 +71,7 @@ def train(model_name: str, class_name: str, batch_size: int, num_workers: int, d
                 opt.step()
                 epoch_loss += loss.item() * imgs.size(0)
             print(f"[AE] epoch {ep}/{epochs} | loss={epoch_loss/len(train_loader.dataset):.4f}")
-
     elif model_name.lower() == "fastflow":
-        
         opt = torch.optim.Adam(model.parameters(), lr=lr)
         for ep in range(1, epochs + 1):
             model.train()
@@ -73,6 +86,10 @@ def train(model_name: str, class_name: str, batch_size: int, num_workers: int, d
     else:
         raise ValueError("Unsupported model")
 
+    # Save
+    ckpt = output_dir / f"{model_name}_{class_name}.pt"
+    torch.save({"model_state": model.state_dict()}, ckpt)
+    print(f"Saved: {ckpt}")
 
 
     # Save model
@@ -84,21 +101,15 @@ def train(model_name: str, class_name: str, batch_size: int, num_workers: int, d
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train anomaly detection models on MVTec AD")
-    parser.add_argument("--model", choices=["padim", "patchcore", "ae", "fastflow"], required=True)
+    parser = argparse.ArgumentParser(description="Train models with YAML config")
+    parser.add_argument("--model", required=True, choices=["ae", "padim", "patchcore", "fastflow"])
     parser.add_argument("--class_name", required=True)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--num_workers", type=int, default=int(env.NUM_WORKERS))
-    parser.add_argument("--epochs", type=int, default=30, help="(AE only) training epochs")
-    parser.add_argument("--lr", type=float, default=1e-3, help="(AE only) learning rate")
+    parser.add_argument("--config", type=str, default="configs/base.yaml", help="YAML config file")
+    parser.add_argument("--extra", type=str, nargs="*", default=[], help="Extra YAMLs merged after --config")
     args = parser.parse_args()
 
-    output_dir = env.RUNS_DIR / args.model / args.class_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    device = env.DEVICE if torch.cuda.is_available() or env.DEVICE == "cpu" else "cpu"
-
-    train(args.model, args.class_name, args.batch_size, args.num_workers, device, output_dir, epochs=args.epochs, lr=args.lr)
+    cfg = load_config(args.config, *args.extra)
+    train(args.model, args.class_name, cfg)
 
 
 if __name__ == "__main__":

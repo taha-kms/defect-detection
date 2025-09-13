@@ -1,0 +1,7 @@
+backbone:
+  name: resnet50
+
+models:
+  patchcore:
+    layers: [layer2, layer3]
+    n_neighbors: 1

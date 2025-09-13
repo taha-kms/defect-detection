@@ -1,0 +1,18 @@
+include:
+  - configs/base.yaml
+
+classes: [bottle, cable, screw, leather, tile, grid]
+models:  [ae, padim, patchcore, fastflow]
+
+data:
+  image_size: 256
+  center_crop: 256
+
+train:
+  batch_size: 16
+  num_workers: 4
+  epochs: 30
+  lr: 0.001
+
+backbone:
+  name: resnet50

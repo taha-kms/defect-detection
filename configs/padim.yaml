@@ -1,0 +1,6 @@
+backbone:
+  name: resnet50
+
+models:
+  padim:
+    layers: [layer1, layer2, layer3]

@@ -1,0 +1,31 @@
+# Global defaults (can be overridden by model/class/experiment configs)
+data:
+  root: data/mvtec_ad
+  image_size: 256
+  center_crop: 256
+
+train:
+  batch_size: 16
+  num_workers: 4
+  epochs: 30          # used by AE / FastFlow
+  lr: 0.001           # used by AE / FastFlow
+  seeds: [42]
+
+backbone:
+  name: resnet50
+  # common layers used by feature-based models (can override per model)
+  layers: [layer2, layer3]
+
+models:
+  # per-model defaults (can override in model YAMLs)
+  ae:
+    base_ch: 32
+  padim:
+    layers: [layer1, layer2, layer3]
+  patchcore:
+    n_neighbors: 1
+    layers: [layer2, layer3]
+  fastflow:
+    num_blocks: 4
+    hidden: 256
+    layers: [layer2, layer3]
