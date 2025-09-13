@@ -60,6 +60,17 @@ def load_model(model_name: str, class_name: str, device: str, cfg: dict):
             covs_inv = covs_inv.cpu().numpy()
         model.covs_inv = covs_inv
 
+        # Restore PatchCore memory bank if present
+    if m == "patchcore" and "memory_bank_data" in ckpt:
+        from sklearn.neighbors import NearestNeighbors
+        mb = ckpt["memory_bank_data"]
+        if isinstance(mb, torch.Tensor):
+            mb = mb.cpu().numpy()
+        n_neighbors = ckpt.get("n_neighbors", getattr(model, "n_neighbors", 1))
+        model.memory_bank = NearestNeighbors(n_neighbors=n_neighbors)
+        model.memory_bank.fit(mb)
+
+
     return model
 
 

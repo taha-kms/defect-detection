@@ -114,11 +114,24 @@ def train(model_name: str, class_name: str, cfg: dict):
     save_path = output_dir / f"{model_name}_{class_name}.pt"
     ckpt = {"model_state": model.state_dict()}
 
-    # Store per-model extras if present (PaDiM)
-    if hasattr(model, "means"):
+    # Store per-model extras
+    if hasattr(model, "means"):      # PaDiM
         ckpt["means"] = getattr(model, "means")
-    if hasattr(model, "covs_inv"):
+    if hasattr(model, "covs_inv"):   # PaDiM
         ckpt["covs_inv"] = getattr(model, "covs_inv")
+
+    # PatchCore memory bank (NearestNeighbors) — save fitted patch embeddings
+    if m == "patchcore" and getattr(model, "memory_bank", None) is not None:
+        # sklearn stores the fitted data in _fit_X
+        mb_data = getattr(model.memory_bank, "_fit_X", None)
+        if mb_data is not None:
+            # torch.save can handle numpy arrays; ensure it’s a dense ndarray
+            import numpy as np
+            mb_np = np.asarray(mb_data)
+            ckpt["memory_bank_data"] = mb_np
+            # also store neighbors hyperparam for convenience
+            ckpt["n_neighbors"] = getattr(model, "n_neighbors", 1)
+            print(f"Saved PatchCore memory bank with {mb_np.shape[0]} patches (dim={mb_np.shape[1]}).")
 
     torch.save(ckpt, save_path)
     print(f"Model saved at {save_path}")

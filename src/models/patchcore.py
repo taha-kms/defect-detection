@@ -54,7 +54,7 @@ class PatchCoreModel(nn.Module):
         all_feats = np.concatenate(all_feats, axis=0)
         self.memory_bank = NearestNeighbors(n_neighbors=self.n_neighbors)
         self.memory_bank.fit(all_feats)
-        print(f"✅ Memory bank built with {len(all_feats)} patches.")
+        print(f"Memory bank built with {len(all_feats)} patches.")
 
     @torch.no_grad()
     def predict(self, imgs: torch.Tensor):
