@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from src.utils import env
 from src.mvtec_ad.dataset import MVTecDataset
 from src.mvtec_ad import transforms as T
-from src.models import PaDiMModel, PatchCoreModel
+from src.models import PaDiMModel, PatchCoreModel, AEModel
 
 
 def get_model(model_name: str, device: str):
@@ -15,11 +15,13 @@ def get_model(model_name: str, device: str):
         return PaDiMModel(backbone=env.BACKBONE, device=device)
     elif model_name.lower() == "patchcore":
         return PatchCoreModel(backbone=env.BACKBONE, device=device)
+    elif model_name.lower() == "ae":
+        return AEModel(device=device)
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
 
-def train(model_name: str, class_name: str, batch_size: int, num_workers: int, device: str, output_dir: Path):
+def train(model_name: str, class_name: str, batch_size: int, num_workers: int, device: str, output_dir: Path, epochs: int = 30, lr: float = 1e-3):
     # Dataset + Loader
     transform = T.get_image_transform(image_size=env.IMAGE_SIZE)
     mask_transform = T.get_mask_transform(image_size=env.IMAGE_SIZE)
@@ -35,25 +37,43 @@ def train(model_name: str, class_name: str, batch_size: int, num_workers: int, d
 
     # Model
     model = get_model(model_name, device)
-    print(f"🚀 Training {model_name} on class '{class_name}' with {len(train_dataset)} samples")
+    print(f"Training {model_name} on class '{class_name}' with {len(train_dataset)} samples")
 
-    # Fit model (no optimizer — unsupervised methods)
-    model.fit(train_loader)
+    if model_name.lower() in {"padim", "patchcore"}:
+        model.fit(train_loader)
+    else:
+        # Standard AE training
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        for epoch in range(1, epochs + 1):
+            epoch_loss = 0.0
+            for imgs, _, _, _ in train_loader:
+                imgs = imgs.to(device)
+                optimizer.zero_grad()
+                recon = model.net(imgs)
+                loss, ssim_val, mse_val = model.loss_fn(imgs, recon)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item() * imgs.size(0)
+            epoch_loss /= len(train_loader.dataset)
+            print(f"[AE] epoch {epoch}/{epochs} | loss={epoch_loss:.4f}")
 
     # Save model
     save_path = output_dir / f"{model_name}_{class_name}.pt"
     torch.save({"model_state": model.state_dict(),
                 "means": getattr(model, "means", None),
                 "covs_inv": getattr(model, "covs_inv", None)}, save_path)
-    print(f"✅ Model saved at {save_path}")
+    print(f"Model saved at {save_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train anomaly detection models on MVTec AD")
-    parser.add_argument("--model", choices=["padim", "patchcore"], required=True, help="Model type")
-    parser.add_argument("--class_name", required=True, help="MVTec class name (e.g., 'bottle')")
+    parser.add_argument("--model", choices=["padim", "patchcore", "ae"], required=True)
+    parser.add_argument("--class_name", required=True)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=int(env.NUM_WORKERS))
+    parser.add_argument("--epochs", type=int, default=30, help="(AE only) training epochs")
+    parser.add_argument("--lr", type=float, default=1e-3, help="(AE only) learning rate")
     args = parser.parse_args()
 
     output_dir = env.RUNS_DIR / args.model / args.class_name
@@ -61,7 +81,7 @@ def main():
 
     device = env.DEVICE if torch.cuda.is_available() or env.DEVICE == "cpu" else "cpu"
 
-    train(args.model, args.class_name, args.batch_size, args.num_workers, device, output_dir)
+    train(args.model, args.class_name, args.batch_size, args.num_workers, device, output_dir, epochs=args.epochs, lr=args.lr)
 
 
 if __name__ == "__main__":

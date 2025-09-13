@@ -8,23 +8,24 @@ from torch.utils.data import DataLoader
 from src.utils import env, metrics, visualization
 from src.mvtec_ad.dataset import MVTecDataset
 from src.mvtec_ad import transforms as T
-from src.models import PaDiMModel, PatchCoreModel
+from src.models import PaDiMModel, PatchCoreModel, AEModel
 
 
 def load_model(model_name: str, class_name: str, device: str):
-    """Load trained model checkpoint."""
     ckpt_path = env.RUNS_DIR / model_name / class_name / f"{model_name}_{class_name}.pt"
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
-
     if model_name == "padim":
         model = PaDiMModel(backbone=env.BACKBONE, device=device)
-    else:
+    elif model_name == "patchcore":
         model = PatchCoreModel(backbone=env.BACKBONE, device=device)
+    elif model_name == "ae":
+        model = AEModel(device=device)
+    else:
+        raise ValueError("Unknown model")
+    
 
     ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model_state"], strict=False)
-
+    
     # Restore Gaussian stats if PaDiM
     if isinstance(model, PaDiMModel):
         model.means = ckpt["means"]
@@ -89,7 +90,7 @@ def evaluate(model_name: str, class_name: str, batch_size: int, num_workers: int
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate trained anomaly detection models")
-    parser.add_argument("--model", choices=["padim", "patchcore"], required=True)
+    parser.add_argument("--model", choices=["padim", "patchcore", "ae"], required=True)
     parser.add_argument("--class_name", required=True, help="MVTec class name")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=int(env.NUM_WORKERS))

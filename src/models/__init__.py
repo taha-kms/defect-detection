@@ -5,5 +5,6 @@ Models package: contains wrappers for anomaly detection models
 
 from .padim import PaDiMModel
 from .patchcore import PatchCoreModel
+from .ae import AEModel
 
-__all__ = ["PaDiMModel", "PatchCoreModel"]
+__all__ = ["PaDiMModel", "PatchCoreModel", "AEModel"]
