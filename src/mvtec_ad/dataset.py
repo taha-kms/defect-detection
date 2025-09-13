@@ -43,7 +43,9 @@ class MVTecDataset(Dataset):
                 img_dir = base_dir / defect_type
                 if not img_dir.is_dir():
                     continue
-                gt_dir = base_dir / "ground_truth" / defect_type
+
+                class_root = self.root / self.class_name
+                gt_dir = class_root / "ground_truth" / defect_type
                 for img_path in sorted(img_dir.glob("*.png")):
                     if defect_type == "good":
                         self.data.append((img_path, None, 0))
