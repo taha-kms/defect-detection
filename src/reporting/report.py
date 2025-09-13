@@ -15,7 +15,7 @@ def main():
 
     rows = collect_metrics(args.models, args.classes)
     if not rows:
-        print("❌ No metrics found to aggregate. Did you run evaluation?")
+        print("No metrics found to aggregate. Did you run evaluation?")
         return
 
     write_csv(rows, out_dir / "summary.csv")
