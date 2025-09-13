@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from tqdm.auto import tqdm
 
 import torch
 from torch.utils.data import DataLoader
@@ -76,7 +77,8 @@ def train(model_name: str, class_name: str, cfg: dict):
         opt = torch.optim.Adam(model.parameters(), lr=lr)
         for ep in range(1, epochs + 1):
             epoch_loss = 0.0
-            for imgs, _, _, _ in train_loader:
+            pbar = tqdm(train_loader, desc=f"[AE] epoch {ep}/{epochs}", leave=False)
+            for imgs, _, _, _ in pbar:
                 imgs = imgs.to(device)
                 opt.zero_grad()
                 recon = model.net(imgs)
@@ -84,18 +86,26 @@ def train(model_name: str, class_name: str, cfg: dict):
                 loss.backward()
                 opt.step()
                 epoch_loss += loss.item() * imgs.size(0)
-            print(f"[AE] epoch {ep}/{epochs} | loss={epoch_loss/len(train_loader.dataset):.4f}")
+
+            avg = epoch_loss/len(train_loader.dataset)
+            pbar.close()
+            print(f"[AE] epoch {ep}/{epochs} | loss={avg:.4f}")
+
+
     elif m == "fastflow":
         opt = torch.optim.Adam(model.parameters(), lr=lr)
         for ep in range(1, epochs + 1):
             model.train()
             epoch_loss = 0.0
-            for imgs, _, _, _ in train_loader:
+            pbar = tqdm(train_loader, desc=f"[FastFlow] epoch {ep}/{epochs}", leave=False)
+            for imgs, _, _, _ in pbar:
                 opt.zero_grad()
                 loss = model.training_step(imgs)
                 loss.backward()
                 opt.step()
                 epoch_loss += loss.item() * imgs.size(0)
+            avg = epoch_loss/len(train_loader.dataset)
+            pbar.close()
             print(f"[FastFlow] epoch {ep}/{epochs} | nll={epoch_loss/len(train_loader.dataset):.4f}")
     else:
         raise ValueError("Unsupported model")

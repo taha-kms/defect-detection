@@ -3,6 +3,9 @@ from pathlib import Path
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
+
+
 
 from src.utils import env, metrics, visualization
 from src.utils.config import load_config
@@ -54,7 +57,7 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path):
     all_scores, all_labels, all_maps, all_masks = [], [], [], []
     print(f"🔍 Evaluating {model_name} on '{class_name}'")
 
-    for imgs, masks, labels, _ in test_loader:
+    for imgs, masks, labels, _ in tqdm(test_loader, desc=f"[Eval:{model_name}] {class_name}", leave=False):
         imgs = imgs.to(device)
         maps, scores = model.predict(imgs)
         all_scores.extend(scores.tolist() if hasattr(scores, "tolist") else list(scores))

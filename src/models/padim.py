@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from torchvision import models
 from torch import Tensor
 import numpy as np
+from tqdm.auto import tqdm
+
 
 
 class FeatureExtractor(nn.Module):
@@ -74,7 +76,7 @@ class PaDiMModel(nn.Module):
         self.feature_extractor.eval()
         embedding_list = []
 
-        for imgs, _, _, _ in dataloader:
+        for imgs, _, _, _ in tqdm(dataloader, desc="[PaDiM] building stats", leave=False):
             imgs = imgs.to(self.device)
             feats = self.feature_extractor(imgs)
             emb = self._embedding_concat(feats)  # [B, C, H, W]

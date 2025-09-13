@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torchvision import models
 from sklearn.neighbors import NearestNeighbors
 import numpy as np
-
+from tqdm.auto import tqdm
 
 class PatchCoreModel(nn.Module):
     def __init__(self, backbone: str = "resnet18", layers=None, device: str = "cuda", n_neighbors: int = 1):
@@ -47,7 +47,7 @@ class PatchCoreModel(nn.Module):
         Build memory bank from normal training patches.
         """
         all_feats = []
-        for imgs, _, _, _ in dataloader:
+        for imgs, _, _, _ in tqdm(dataloader, desc="[PatchCore] building memory bank", leave=False):
             imgs = imgs.to(self.device)
             feats, _ = self._embed(imgs)
             all_feats.append(feats)
