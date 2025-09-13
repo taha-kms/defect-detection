@@ -15,8 +15,8 @@ def get_model(model_name: str, device: str, cfg: dict):
     m = model_name.lower()
     bb = cfg.get("backbone", {}).get("name", env.BACKBONE)
     if m == "padim":
-        layers = cfg.get("models", {}).get("padim", {}).get("layers", ["layer1", "layer2", "layer3"])
-        return PaDiMModel(backbone=bb, device=device)  # simplified PaDiM ignores layers in our stub
+        # Note: in this simplified stub PaDiM ignores provided layers
+        return PaDiMModel(backbone=bb, device=device)
     if m == "patchcore":
         return PatchCoreModel(backbone=bb, device=device)
     if m == "ae":
@@ -27,7 +27,13 @@ def get_model(model_name: str, device: str, cfg: dict):
         layers = ff.get("layers", ["layer2", "layer3"])
         num_blocks = ff.get("num_blocks", 4)
         hidden = ff.get("hidden", 256)
-        return FastFlowModel(backbone=bb, device=device, layers=layers, num_blocks=num_blocks, hidden=hidden)
+        return FastFlowModel(
+            backbone=bb,
+            device=device,
+            layers=layers,
+            num_blocks=num_blocks,
+            hidden=hidden,
+        )
     raise ValueError(f"Unknown model: {model_name}")
 
 
@@ -45,19 +51,27 @@ def train(model_name: str, class_name: str, cfg: dict):
     # Data
     transform = T.get_image_transform(image_size=im_size, center_crop=center_crop)
     mask_transform = T.get_mask_transform(image_size=im_size, center_crop=center_crop)
-    train_dataset = MVTecDataset(root=env.DATA_DIR, class_name=class_name, split="train",
-                                 transform=transform, mask_transform=mask_transform)
+    train_dataset = MVTecDataset(
+        root=env.DATA_DIR,
+        class_name=class_name,
+        split="train",
+        transform=transform,
+        mask_transform=mask_transform,
+    )
     train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, num_workers=nw)
 
     # Model
     output_dir = env.RUNS_DIR / model_name / class_name
     output_dir.mkdir(parents=True, exist_ok=True)
     model = get_model(model_name, device, cfg)
-    print(f"🚀 Training {model_name} on '{class_name}' (bs={bs}, epochs={epochs}, lr={lr})")
+    print(f"Training {model_name} on '{class_name}' (bs={bs}, epochs={epochs}, lr={lr})")
 
-    if model_name.lower() in {"padim", "patchcore"}:
+    # Training logic per model
+    m = model_name.lower()
+    if m in {"padim", "patchcore"}:
+        # Non-gradient "fitting" procedures
         model.fit(train_loader)
-    elif model_name.lower() == "ae":
+    elif m == "ae":
         model.train()
         opt = torch.optim.Adam(model.parameters(), lr=lr)
         for ep in range(1, epochs + 1):
@@ -71,7 +85,7 @@ def train(model_name: str, class_name: str, cfg: dict):
                 opt.step()
                 epoch_loss += loss.item() * imgs.size(0)
             print(f"[AE] epoch {ep}/{epochs} | loss={epoch_loss/len(train_loader.dataset):.4f}")
-    elif model_name.lower() == "fastflow":
+    elif m == "fastflow":
         opt = torch.optim.Adam(model.parameters(), lr=lr)
         for ep in range(1, epochs + 1):
             model.train()
@@ -86,17 +100,17 @@ def train(model_name: str, class_name: str, cfg: dict):
     else:
         raise ValueError("Unsupported model")
 
-    # Save
-    ckpt = output_dir / f"{model_name}_{class_name}.pt"
-    torch.save({"model_state": model.state_dict()}, ckpt)
-    print(f"Saved: {ckpt}")
-
-
-    # Save model
+    # ---- Single checkpoint save (includes PaDiM stats when available) ----
     save_path = output_dir / f"{model_name}_{class_name}.pt"
-    torch.save({"model_state": model.state_dict(),
-                "means": getattr(model, "means", None),
-                "covs_inv": getattr(model, "covs_inv", None)}, save_path)
+    ckpt = {"model_state": model.state_dict()}
+
+    # Store per-model extras if present (PaDiM)
+    if hasattr(model, "means"):
+        ckpt["means"] = getattr(model, "means")
+    if hasattr(model, "covs_inv"):
+        ckpt["covs_inv"] = getattr(model, "covs_inv")
+
+    torch.save(ckpt, save_path)
     print(f"Model saved at {save_path}")
 
 
@@ -104,8 +118,12 @@ def main():
     parser = argparse.ArgumentParser(description="Train models with YAML config")
     parser.add_argument("--model", required=True, choices=["ae", "padim", "patchcore", "fastflow"])
     parser.add_argument("--class_name", required=True)
-    parser.add_argument("--config", type=str, default="configs/base.yaml", help="YAML config file")
-    parser.add_argument("--extra", type=str, nargs="*", default=[], help="Extra YAMLs merged after --config")
+    parser.add_argument(
+        "--config", type=str, default="configs/base.yaml", help="YAML config file"
+    )
+    parser.add_argument(
+        "--extra", type=str, nargs="*", default=[], help="Extra YAMLs merged after --config"
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config, *args.extra)
