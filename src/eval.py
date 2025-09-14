@@ -11,6 +11,7 @@ from src.utils.config import load_config
 from src.mvtec_ad.dataset import MVTecDataset
 from src.mvtec_ad import transforms as T
 from src.models import PaDiMModel, PatchCoreModel, AEModel, FastFlowModel
+from src.utils.postproc import normalize_map, find_best_threshold
 
 
 def load_model(model_name: str, class_name: str, device: str, cfg: dict,
@@ -98,6 +99,20 @@ def _align_maps_to_masks(all_maps: np.ndarray, all_masks: np.ndarray) -> tuple[n
     return all_maps, all_masks
 
 
+def _denormalize_imagenet(img_tensor: torch.Tensor) -> np.ndarray:
+    """
+    Inverse the ImageNet normalization used in transforms to get nice RGB overlays.
+    Input: [3,H,W] (torch), Output: HxWx3 float in [0,1]
+    """
+    IM_MEAN = [0.485, 0.456, 0.406]
+    IM_STD = [0.229, 0.224, 0.225]
+    x = img_tensor.detach().cpu().float()
+    for c in range(3):
+        x[c] = x[c] * IM_STD[c] + IM_MEAN[c]
+    x = x.clamp(0, 1)
+    return x.permute(1, 2, 0).numpy()
+
+
 def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_root: Path):
     # Resolve params (env acts as fallback)
     device = env.DEVICE if torch.cuda.is_available() or env.DEVICE == "cpu" else "cpu"
@@ -121,6 +136,11 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     model.eval()
 
     all_scores, all_labels, all_maps, all_masks = [], [], [], []
+
+    # keep a limited cache of denormalized images for visualization to avoid high RAM usage
+    kept_images: list[np.ndarray] = []  # HxWx3 in [0,1]
+    kept_limit = 200  # adjust if you want larger galleries
+
     print(f"Evaluating {model_name} on '{class_name}'")
 
     with torch.no_grad():
@@ -133,6 +153,12 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
             all_labels.extend(labels.numpy().tolist())
             all_maps.append(maps)            # maps: [B,Hf,Wf] (numpy)
             all_masks.append(masks.numpy())  # masks: [B,1,Hm,Wm] (torch->numpy)
+
+            # Keep some RGBs for later visualization
+            if len(kept_images) < kept_limit:
+                take = min(imgs.size(0), kept_limit - len(kept_images))
+                for i in range(take):
+                    kept_images.append(_denormalize_imagenet(imgs[i]))
 
     # Concatenate
     all_scores = np.asarray(all_scores)
@@ -163,6 +189,95 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
         f.write(f"pixel_auroc: {pix_auc:.6f}\n")
         f.write(f"auprc: {pr_auc:.6f}\n")
         f.write(f"pro: {pro:.6f}\n")
+
+    # ---------- Qualitative overlays ----------
+    # Create 4-panel visuals: image / GT / normalized map / overlay
+    out_vis = output_dir / "qualitative"
+    out_vis.mkdir(parents=True, exist_ok=True)
+
+    N = len(all_scores)
+    labels_np = all_labels
+    scores_np = all_scores
+    masks_np = all_masks  # [N,H,W]
+    maps_np = all_maps    # [N,H,W] (aligned)
+
+    # Normalize maps to [0,1] for nicer heatmaps
+    maps_norm = np.stack([normalize_map(m) for m in maps_np], axis=0)
+
+    # Determine a reasonable operating threshold (Youden’s J)
+    thr = find_best_threshold(labels_np, scores_np)
+
+    # Predictions at image-level
+    preds = (scores_np >= thr).astype(int)
+
+    # Indices for TP/FP/FN and a sample of TN
+    idx_tp = np.where((preds == 1) & (labels_np == 1))[0]
+    idx_fp = np.where((preds == 1) & (labels_np == 0))[0]
+    idx_fn = np.where((preds == 0) & (labels_np == 1))[0]
+    idx_tn = np.where((preds == 0) & (labels_np == 0))[0]
+
+    # Because we only cached the first `kept_limit` denormalized images,
+    # restrict galleries to indices within that range
+    max_vis_idx = len(kept_images)
+    idx_tp = idx_tp[idx_tp < max_vis_idx]
+    idx_fp = idx_fp[idx_fp < max_vis_idx]
+    idx_fn = idx_fn[idx_fn < max_vis_idx]
+    idx_tn = idx_tn[idx_tn < max_vis_idx]
+
+    def _make_panels(idx: int):
+        img = kept_images[idx]  # HxWx3 in [0,1]
+        gt = masks_np[idx].astype(np.float32)         # HxW in {0,1}
+        amap = maps_norm[idx].astype(np.float32)      # HxW in [0,1]
+        overlay = visualization.overlay_heatmap(img, amap, alpha=0.5)
+        gt3 = np.repeat(gt[..., None], 3, axis=2)
+        amap3 = np.repeat(amap[..., None], 3, axis=2)
+        return [
+            (img * 255).astype(np.uint8),
+            (gt3 * 255).astype(np.uint8),
+            (amap3 * 255).astype(np.uint8),
+            overlay,
+        ], [f"img#{idx}", "GT", "map", "overlay"]
+
+    def _save_gallery(indices: np.ndarray, title: str, max_k: int = 12):
+        if indices.size == 0:
+            return
+        # top-K by score (descending)
+        pick = indices[np.argsort(scores_np[indices])[::-1][:max_k]]
+        images, titles = [], []
+        for idx in pick:
+            panels, t = _make_panels(idx)
+            images.extend(panels)
+            titles.extend(t)
+        if images:
+            rows = int(np.ceil(len(images) / 4))
+            visualization.save_image_grid(
+                images, titles, out_vis / f"{title}.png", cols=4, figsize=(12, 3 * rows)
+            )
+
+    _save_gallery(idx_tp, "TP_top")
+    _save_gallery(idx_fp, "FP_top")
+    _save_gallery(idx_fn, "FN_top")
+
+    # a random subset of true negatives for sanity check
+    if idx_tn.size > 0:
+        rng = np.random.default_rng(0)
+        tn_sample = rng.choice(idx_tn, size=min(12, idx_tn.size), replace=False)
+        _save_gallery(tn_sample, "TN_sample", max_k=12)
+
+    # Also save a single “teaser” grid mixing a few of each type
+    mix_parts = []
+    for arr, k in ((idx_tp, 3), (idx_fp, 3), (idx_fn, 3), (idx_tn, 3)):
+        if arr.size > 0:
+            mix_parts.append(arr[:k])
+    if mix_parts:
+        mix = np.concatenate(mix_parts)[:12]
+        images, titles = [], []
+        for idx in mix:
+            panels, t = _make_panels(idx)
+            images.extend(panels)
+            titles.extend(t)
+        if images:
+            visualization.save_image_grid(images, titles, out_vis / "teaser.png", cols=4, figsize=(12, 12))
 
 
 def main():

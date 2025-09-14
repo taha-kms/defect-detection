@@ -62,7 +62,7 @@ def save_image_grid(images, titles, save_path: Path, cols: int = 3, figsize=(12,
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path)
     plt.close()
-    print(f"📸 Saved {save_path}")
+    print(f"Saved {save_path}")
 
 
 def plot_roc_curve(labels, scores, save_path: Path):
