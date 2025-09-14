@@ -5,6 +5,9 @@ from datetime import datetime as dt
 import torch
 import json
 from torch.utils.data import DataLoader
+from colorama import Fore, Back, Style, init
+init(autoreset=True)
+
 
 from src.utils import env
 from src.utils.config import load_config
@@ -156,6 +159,7 @@ def train(model_name: str, class_name: str, cfg: dict):
     "config": cfg,
     }, indent=2))
 
+    print(Back.WHITE + Fore.BLACK + "run_id: " + run_id + Style.RESET_ALL)
 
 def main():
     parser = argparse.ArgumentParser(description="Train models with YAML config")
