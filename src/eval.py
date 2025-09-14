@@ -1,8 +1,7 @@
-# src/eval.py
-
 import argparse
 from pathlib import Path
 import numpy as np
+
 import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -14,12 +13,16 @@ from src.mvtec_ad import transforms as T
 from src.models import PaDiMModel, PatchCoreModel, AEModel, FastFlowModel
 
 
-def load_model(model_name: str, class_name: str, device: str, cfg: dict):
+def load_model(model_name: str, class_name: str, device: str, cfg: dict,
+               ckpt_path: Path | None = None):
     """
     Instantiate the requested model, then load its checkpoint.
     For PaDiM we also restore the Gaussian stats (means, covs_inv).
     """
-    ckpt_path = env.RUNS_DIR / model_name / class_name / f"{model_name}_{class_name}.pt"
+    # Prefer an explicitly provided checkpoint path (per-run); otherwise fall back to legacy location.
+    if ckpt_path is None:
+        ckpt_path = env.RUNS_DIR / model_name / class_name / f"{model_name}_{class_name}.pt"
+
     m = model_name.lower()
     bb = cfg.get("backbone", {}).get("name", env.BACKBONE)
 
@@ -41,7 +44,7 @@ def load_model(model_name: str, class_name: str, device: str, cfg: dict):
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
-    # IMPORTANT: allow loading numpy extras from our trusted checkpoint (PyTorch 2.6+ change)
+    # IMPORTANT: allow loading numpy extras from our trusted checkpoint
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
 
     # Load model weights
@@ -60,7 +63,7 @@ def load_model(model_name: str, class_name: str, device: str, cfg: dict):
             covs_inv = covs_inv.cpu().numpy()
         model.covs_inv = covs_inv
 
-        # Restore PatchCore memory bank if present
+    # Restore PatchCore memory bank if present
     if m == "patchcore" and "memory_bank_data" in ckpt:
         from sklearn.neighbors import NearestNeighbors
         mb = ckpt["memory_bank_data"]
@@ -69,7 +72,6 @@ def load_model(model_name: str, class_name: str, device: str, cfg: dict):
         n_neighbors = ckpt.get("n_neighbors", getattr(model, "n_neighbors", 1))
         model.memory_bank = NearestNeighbors(n_neighbors=n_neighbors)
         model.memory_bank.fit(mb)
-
 
     return model
 
@@ -96,7 +98,7 @@ def _align_maps_to_masks(all_maps: np.ndarray, all_masks: np.ndarray) -> tuple[n
     return all_maps, all_masks
 
 
-def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path):
+def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_root: Path):
     # Resolve params (env acts as fallback)
     device = env.DEVICE if torch.cuda.is_available() or env.DEVICE == "cpu" else "cpu"
     bs = cfg.get("train", {}).get("batch_size", 16)
@@ -113,8 +115,9 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path):
     )
     test_loader = DataLoader(test_dataset, batch_size=bs, shuffle=False, num_workers=nw)
 
-    # Load model + checkpoint
-    model = load_model(model_name, class_name, device, cfg)
+    # Load model + checkpoint (from the run root)
+    ckpt_path = run_root / f"{model_name}_{class_name}.pt"
+    model = load_model(model_name, class_name, device, cfg, ckpt_path=ckpt_path)
     model.eval()
 
     all_scores, all_labels, all_maps, all_masks = [], [], [], []
@@ -168,13 +171,19 @@ def main():
     parser.add_argument("--class_name", required=True)
     parser.add_argument("--config", type=str, default="configs/base.yaml")
     parser.add_argument("--extra", type=str, nargs="*", default=[])
+    parser.add_argument("--run_id", type=str, default=None, help="Optional run ID to evaluate a specific run")
     args = parser.parse_args()
 
     cfg = load_config(args.config, *args.extra)
-    out_dir = env.RUNS_DIR / args.model / args.class_name / "eval"
+
+    base = env.RUNS_DIR / args.model / args.class_name
+    run_root = (base / "runs" / args.run_id) if args.run_id else (base / "latest")
+    out_dir = run_root / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
-    evaluate(args.model, args.class_name, cfg, out_dir)
+
+    evaluate(args.model, args.class_name, cfg, out_dir, run_root=run_root)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

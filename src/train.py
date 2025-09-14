@@ -1,8 +1,9 @@
 import argparse
 from pathlib import Path
 from tqdm.auto import tqdm
-
+from datetime import datetime as dt
 import torch
+import json
 from torch.utils.data import DataLoader
 
 from src.utils import env
@@ -62,10 +63,15 @@ def train(model_name: str, class_name: str, cfg: dict):
     train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True, num_workers=nw)
 
     # Model
-    output_dir = env.RUNS_DIR / model_name / class_name
+    run_id = dt.now().strftime("%Y%m%d-%H%M%S")
+    base_dir = env.RUNS_DIR / model_name / class_name
+    output_dir = env.RUNS_DIR / model_name / class_name / "runs" / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     model = get_model(model_name, device, cfg)
     print(f"Training {model_name} on '{class_name}' (bs={bs}, epochs={epochs}, lr={lr})")
+
+    latest_dir = base_dir / "latest"
+    latest_dir.mkdir(parents=True, exist_ok=True)
 
     # Training logic per model
     m = model_name.lower()
@@ -112,6 +118,7 @@ def train(model_name: str, class_name: str, cfg: dict):
 
     # ---- Single checkpoint save (includes PaDiM stats when available) ----
     save_path = output_dir / f"{model_name}_{class_name}.pt"
+    save_latest_path = latest_dir / f"{model_name}_{class_name}.pt"
     ckpt = {"model_state": model.state_dict()}
 
     # Store per-model extras
@@ -134,7 +141,20 @@ def train(model_name: str, class_name: str, cfg: dict):
             print(f"Saved PatchCore memory bank with {mb_np.shape[0]} patches (dim={mb_np.shape[1]}).")
 
     torch.save(ckpt, save_path)
+    torch.save(ckpt, save_latest_path)
+
+    (output_dir / "run.json").write_text(json.dumps({
+    "model": model_name,
+    "class": class_name,
+    "config": cfg,
+    }, indent=2))
     print(f"Model saved at {save_path}")
+
+    (latest_dir / "run.json").write_text(json.dumps({
+    "model": model_name,
+    "class": class_name,
+    "config": cfg,
+    }, indent=2))
 
 
 def main():
@@ -151,7 +171,7 @@ def main():
 
     cfg = load_config(args.config, *args.extra)
     train(args.model, args.class_name, cfg)
-
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
