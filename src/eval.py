@@ -1,3 +1,5 @@
+#src/eval.py
+
 import argparse
 from pathlib import Path
 import numpy as np
@@ -113,7 +115,7 @@ def _denormalize_imagenet(img_tensor: torch.Tensor) -> np.ndarray:
     return x.permute(1, 2, 0).numpy()
 
 
-def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_root: Path, run_id: str | None = None):
+def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_id: Path):
     # Resolve params (env acts as fallback)
     device = env.DEVICE if torch.cuda.is_available() or env.DEVICE == "cpu" else "cpu"
     bs = cfg.get("train", {}).get("batch_size", 16)
@@ -131,7 +133,7 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     test_loader = DataLoader(test_dataset, batch_size=bs, shuffle=False, num_workers=nw)
 
     # Load model + checkpoint (from the run root)
-    ckpt_path = run_root / f"{model_name}_{class_name}.pt"
+    ckpt_path = run_id / f"{model_name}_{class_name}.pt"
     model = load_model(model_name, class_name, device, cfg, ckpt_path=ckpt_path)
     model.eval()
 
@@ -184,23 +186,17 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     visualization.plot_pr_curve(all_labels, all_scores, output_dir / "pr_curve.png")
 
     # Save metrics
-    with open(output_dir / "metrics.txt", "w") as f: 
-        f.write(f"run_id: {run_id}\n") 
-        f.write(f"image_auroc: {img_auc:.6f}\n") 
-        f.write(f"pixel_auroc: {pix_auc:.6f}\n") 
-        f.write(f"auprc: {pr_auc:.6f}\n") 
-        f.write(f"pro: {pro:.6f}\n") 
-        f.write(f"threshold: {thr:.6f}\n") 
-        f.write(f"tp: {len(idx_tp)}\n") 
-        f.write(f"fp: {len(idx_fp)}\n") 
-        f.write(f"fn: {len(idx_fn)}\n") 
-        f.write(f"tn: {len(idx_tn)}\n")
+    with open(output_dir / "metrics.txt", "w") as f:
+        f.write(f"image_auroc: {img_auc:.6f}\n")
+        f.write(f"pixel_auroc: {pix_auc:.6f}\n")
+        f.write(f"auprc: {pr_auc:.6f}\n")
+        f.write(f"pro: {pro:.6f}\n")
+
     # ---------- Qualitative overlays ----------
     # Create 4-panel visuals: image / GT / normalized map / overlay
-    out_vis = output_dir / "qualitative"
+    out_vis = output_dir
     out_vis.mkdir(parents=True, exist_ok=True)
 
-    N = len(all_scores)
     labels_np = all_labels
     scores_np = all_scores
     masks_np = all_masks  # [N,H,W]
@@ -210,15 +206,7 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     maps_norm = np.stack([normalize_map(m) for m in maps_np], axis=0)
 
     # Determine a reasonable operating threshold (Youden’s J)
-    # Default fallback threshold
-    thr = 0.5  
-
-    if len(scores_np) > 0 and len(labels_np) > 0:
-        try:
-            thr = find_best_threshold(labels_np, scores_np)
-        except Exception as e:
-            print(f"[WARN] Failed to compute threshold: {e}. Using default {thr}")
-
+    thr = find_best_threshold(labels_np, scores_np)
 
     # Predictions at image-level
     preds = (scores_np >= thr).astype(int)
@@ -237,45 +225,16 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     idx_fn = idx_fn[idx_fn < max_vis_idx]
     idx_tn = idx_tn[idx_tn < max_vis_idx]
 
-    def _make_panels(idx: int):
-        img = kept_images[idx]  # HxWx3 in [0,1]
-        gt = masks_np[idx].astype(np.float32)         # HxW in {0,1}
-        amap = maps_norm[idx].astype(np.float32)      # HxW in [0,1]
-        overlay = visualization.overlay_heatmap(img, amap, alpha=0.5)
-        gt3 = np.repeat(gt[..., None], 3, axis=2)
-        amap3 = np.repeat(amap[..., None], 3, axis=2)
-        return [
-            (img * 255).astype(np.uint8),
-            (gt3 * 255).astype(np.uint8),
-            (amap3 * 255).astype(np.uint8),
-            overlay,
-        ], [f"img#{idx}", "GT", "map", "overlay"]
 
-    def _save_gallery(indices: np.ndarray, title: str, max_k: int = 12):
-        if indices.size == 0:
-            return
-        # top-K by score (descending)
-        pick = indices[np.argsort(scores_np[indices])[::-1][:max_k]]
-        images, titles = [], []
-        for idx in pick:
-            panels, t = _make_panels(idx)
-            images.extend(panels)
-            titles.extend(t)
-        if images:
-            rows = int(np.ceil(len(images) / 4))
-            visualization.save_image_grid(
-                images, titles, out_vis / f"{title}.png", cols=4, figsize=(12, 3 * rows)
-            )
+    visualization.save_gallery(idx_tp, "TP_top", out_vis, scores_np, kept_images, masks_np, maps_norm)
+    visualization.save_gallery(idx_fp, "FP_top", out_vis, scores_np, kept_images, masks_np, maps_norm)
+    visualization.save_gallery(idx_fn, "FN_top", out_vis, scores_np, kept_images, masks_np, maps_norm)
 
-    _save_gallery(idx_tp, "TP_top")
-    _save_gallery(idx_fp, "FP_top")
-    _save_gallery(idx_fn, "FN_top")
-
-    # a random subset of true negatives for sanity check
     if idx_tn.size > 0:
         rng = np.random.default_rng(0)
         tn_sample = rng.choice(idx_tn, size=min(12, idx_tn.size), replace=False)
-        _save_gallery(tn_sample, "TN_sample", max_k=12)
+        visualization.save_gallery(tn_sample, "TN_sample", out_vis, scores_np, kept_images, masks_np, maps_norm)
+
 
     # Also save a single “teaser” grid mixing a few of each type
     mix_parts = []
@@ -286,11 +245,24 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
         mix = np.concatenate(mix_parts)[:12]
         images, titles = [], []
         for idx in mix:
-            panels, t = _make_panels(idx)
+            panels, t = visualization.make_panels(idx, kept_images, masks_np, maps_norm)
             images.extend(panels)
             titles.extend(t)
         if images:
             visualization.save_image_grid(images, titles, out_vis / "teaser.png", cols=4, figsize=(12, 12))
+
+# (idx, kept_images, masks_np, maps_norm, out_vis)
+    with open(output_dir / "metrics.txt", "w") as f:
+        f.write(f"run_id: {run_id}\n")
+        f.write(f"image_auroc: {img_auc:.6f}\n")
+        f.write(f"pixel_auroc: {pix_auc:.6f}\n")
+        f.write(f"auprc: {pr_auc:.6f}\n")
+        f.write(f"pro: {pro:.6f}\n")
+        f.write(f"threshold: {thr:.6f}\n")
+        f.write(f"tp: {len(idx_tp)}\n")
+        f.write(f"fp: {len(idx_fp)}\n")
+        f.write(f"fn: {len(idx_fn)}\n")
+        f.write(f"tn: {len(idx_tn)}\n")
 
 
 def main():
@@ -305,11 +277,11 @@ def main():
     cfg = load_config(args.config, *args.extra)
 
     base = env.RUNS_DIR / args.model / args.class_name
-    run_root = (base / "runs" / args.run_id) if args.run_id else (base / "latest")
-    out_dir = run_root / "eval"
+    run_id = (base / "runs" / args.run_id) if args.run_id else (base / "latest")
+    out_dir = run_id / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    evaluate(args.model, args.class_name, cfg, out_dir, run_root=run_root, run_id=args.run_id)
+    evaluate(args.model, args.class_name, cfg, out_dir, run_id=run_id)
     return 0
 
 

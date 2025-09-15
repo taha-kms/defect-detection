@@ -1,3 +1,4 @@
+#src/utiles/visualization.py
 
 from pathlib import Path
 import numpy as np
@@ -84,7 +85,7 @@ def plot_roc_curve(labels, scores, save_path: Path):
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path)
     plt.close()
-    print(f"Saved ROC curve: {save_path}")
+    print(f"Saved {save_path}")
 
 
 def plot_pr_curve(labels, scores, save_path: Path):
@@ -105,4 +106,48 @@ def plot_pr_curve(labels, scores, save_path: Path):
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path)
     plt.close()
-    print(f"Saved PR curve: {save_path}")
+    print(f"Saved {save_path}")
+
+
+
+def make_panels(idx: int, kept_images, masks_np, maps_norm):
+    img = kept_images[idx]  # HxWx3 in [0,1]
+    gt = masks_np[idx].astype(np.float32)         # HxW in {0,1}
+    amap = maps_norm[idx].astype(np.float32)      # HxW in [0,1]
+    overlay = overlay_heatmap(img, amap, alpha=0.5)
+    gt3 = np.repeat(gt[..., None], 3, axis=2)
+    amap3 = np.repeat(amap[..., None], 3, axis=2)
+    return [
+        (img * 255).astype(np.uint8),
+        (gt3 * 255).astype(np.uint8),
+        (amap3 * 255).astype(np.uint8),
+        overlay,
+    ], [f"img#{idx}", "GT", "map", "overlay"]
+
+
+def save_gallery(
+    indices: np.ndarray,
+    title: str,
+    out_vis: Path,
+    scores_np: np.ndarray,
+    kept_images,
+    masks_np,
+    maps_norm,
+    max_k: int = 12
+):
+    if indices.size == 0:
+        return
+
+    # top-K by score (descending)
+    pick = indices[np.argsort(scores_np[indices])[::-1][:max_k]]
+    images, titles = [], []
+    for idx in pick:
+        panels, t = make_panels(idx, kept_images, masks_np, maps_norm)
+        images.extend(panels)
+        titles.extend(t)
+
+    if images:
+        rows = int(np.ceil(len(images) / 4))
+        save_image_grid(
+            images, titles, out_vis / f"{title}.png", cols=4, figsize=(12, 3 * rows)
+        )

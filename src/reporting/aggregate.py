@@ -142,7 +142,6 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
       1. Best overall across all classes/models
       2. Per-class metrics (sorted by image_auroc)
       3. Per-model metrics (sorted by image_auroc)
-      4. Visual diagnostics (ROC, PR, qualitative)
     """
     out_md.parent.mkdir(parents=True, exist_ok=True)
     core_metrics = ["image_auroc", "pixel_auroc", "auprc", "pro"]
