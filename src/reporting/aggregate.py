@@ -37,15 +37,21 @@ def _parse_metrics_file(path: Path) -> MetricDict | None:
 
 
 def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str | float]]:
-    rows = []
+    rows: List[Dict[str, str | float]] = []
     for model in models:
         for cls in classes:
-            # support both legacy path and latest/ path
-            for candidate in [
+            candidates = [
                 env.RUNS_DIR / model / cls / "eval" / "metrics.txt",
                 env.RUNS_DIR / model / cls / "latest" / "eval" / "metrics.txt",
-            ]:
-                mdict = _parse_metrics_file(candidate)
+            ]
+            # also scan run directories
+            runs_dir = env.RUNS_DIR / model / cls / "runs"
+            if runs_dir.exists():
+                for run in runs_dir.iterdir():
+                    candidates.append(run / "eval" / "metrics.txt")
+
+            for path in candidates:
+                mdict = _parse_metrics_file(path)
                 if mdict is not None:
                     row = {"model": model, "class": cls}
                     row.update(mdict)
