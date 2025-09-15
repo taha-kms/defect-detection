@@ -37,18 +37,26 @@ def _parse_metrics_file(path: Path) -> MetricDict | None:
 
 
 def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str | float]]:
+    """
+    Collect all metrics from runs/<model>/<class>/runs/<runid>/eval/metrics.txt
+    (and also handle legacy latest/eval/metrics.txt if present).
+    """
     rows: List[Dict[str, str | float]] = []
     for model in models:
         for cls in classes:
-            candidates = [
-                env.RUNS_DIR / model / cls / "eval" / "metrics.txt",
-                env.RUNS_DIR / model / cls / "latest" / "eval" / "metrics.txt",
-            ]
-            # also scan run directories
+            candidates: List[Path] = []
+
+            # legacy style
+            candidates.append(env.RUNS_DIR / model / cls / "eval" / "metrics.txt")
+            candidates.append(env.RUNS_DIR / model / cls / "latest" / "eval" / "metrics.txt")
+
+            # all run directories
             runs_dir = env.RUNS_DIR / model / cls / "runs"
             if runs_dir.exists():
-                for run in runs_dir.iterdir():
-                    candidates.append(run / "eval" / "metrics.txt")
+                for run in sorted(runs_dir.iterdir()):
+                    mfile = run / "eval" / "metrics.txt"
+                    if mfile.exists():
+                        candidates.append(mfile)
 
             for path in candidates:
                 mdict = _parse_metrics_file(path)
@@ -56,8 +64,8 @@ def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str
                     row = {"model": model, "class": cls}
                     row.update(mdict)
                     rows.append(row)
-                    break
     return rows
+
 
 
 
@@ -107,101 +115,94 @@ def summarize(rows: List[Dict[str, str | float]]) -> Dict[str, Dict[str, float]]
     return out
 
 
-def write_markdown(rows: List[Dict[str, str | float]],
-                   summary: Dict[str, Dict[str, float]],
-                   out_md: Path):
+def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
     """
     Generate a Markdown report with:
-      - Per-class results (all metrics found)
-      - Per-model averages
-      - Global averages (across all rows)
-      - Best models per metric
-      - Links to plots/qualitative images if available
+      1. Best overall across all classes/models
+      2. Per-class metrics (sorted by image_auroc)
+      3. Per-model metrics (sorted by image_auroc)
+      4. Visual diagnostics (ROC, PR, qualitative)
     """
     out_md.parent.mkdir(parents=True, exist_ok=True)
-    models = sorted(summary.keys())
-    metrics = ["image_auroc", "pixel_auroc", "auprc", "pro"]
+    core_metrics = ["image_auroc", "pixel_auroc", "auprc", "pro"]
 
-    # --------- Best per metric ---------
-    best: Dict[str, Tuple[str, float]] = {}
-    for met in metrics:
-        best_model, best_val = None, -math.inf
-        for m in models:
-            v = summary[m][met]
-            if v > best_val:
-                best_model, best_val = m, v
-        best[met] = (best_model, best_val)
+    # -------- Best overall (single row) --------
+    best_overall = None
+    best_score = -math.inf
+    for r in rows:
+        score = sum(float(r[m]) for m in core_metrics if m in r) / len(core_metrics)
+        if score > best_score:
+            best_overall = r
+            best_score = score
 
     with open(out_md, "w") as f:
         f.write("# Experiment Summary\n\n")
         f.write(f"- Data root: `{env.DATA_DIR}`\n")
         f.write(f"- Runs root: `{env.RUNS_DIR}`\n\n")
 
-        # --------- Per-class table ---------
-        f.write("## Per-class results\n\n")
+        # ---------- 1. Best overall ----------
+        f.write("## 1. Best Overall\n\n")
+        if best_overall:
+            f.write(f"Best overall: **{best_overall['model']}** on **{best_overall['class']}**\n\n")
+            for m in core_metrics:
+                if m in best_overall:
+                    f.write(f"- {m}: {best_overall[m]:.4f}\n")
+            # also dump extra fields
+            for k, v in best_overall.items():
+                if k not in ("model", "class") and k not in core_metrics:
+                    f.write(f"- {k}: {v}\n")
+            f.write("\n")
 
-        # gather all possible columns
-        all_fields = sorted({k for r in rows for k in r.keys()})
-        # put model, class first
-        field_order = ["model", "class"] + [k for k in all_fields if k not in ("model", "class")]
+        # ---------- 2. Per-class info ----------
+        f.write("## 2. Per-Class Information (sorted)\n\n")
+        classes = sorted(set(r["class"] for r in rows))
+        for cls in classes:
+            f.write(f"### Class: {cls}\n\n")
+            cls_rows = [r for r in rows if r["class"] == cls]
+            cls_rows.sort(key=lambda r: float(r.get("image_auroc", 0.0)), reverse=True)
 
-        # header
-        f.write("| " + " | ".join(field_order) + " |\n")
-        f.write("|" + "|".join([":---:" for _ in field_order]) + "|\n")
+            all_fields = sorted({k for r in cls_rows for k in r.keys()})
+            field_order = ["model", "class"] + [k for k in all_fields if k not in ("model", "class")]
 
-        for r in sorted(rows, key=lambda x: (x["model"], x["class"])):
-            vals = []
-            for k in field_order:
-                v = r.get(k, "")
-                if isinstance(v, float):
-                    vals.append(f"{v:.4f}")
-                else:
-                    vals.append(str(v))
-            f.write("| " + " | ".join(vals) + " |\n")
+            f.write("| " + " | ".join(field_order) + " |\n")
+            f.write("|" + "|".join([":---:" for _ in field_order]) + "|\n")
+            for r in cls_rows:
+                vals = []
+                for k in field_order:
+                    v = r.get(k, "")
+                    if isinstance(v, float):
+                        vals.append(f"{v:.4f}")
+                    else:
+                        vals.append(str(v))
+                f.write("| " + " | ".join(vals) + " |\n")
+            f.write("\n")
 
-        # --------- Per-model averages ---------
-        f.write("\n## Per-model averages (across classes)\n\n")
-        f.write("| Model | " + " | ".join(m.title().replace("_", " ") for m in metrics) + " |\n")
-        f.write("|" + "|".join([":---:" for _ in range(len(metrics)+1)]) + "|\n")
+        # ---------- 3. Per-model info ----------
+        f.write("## 3. Per-Model Information (sorted)\n\n")
+        models = sorted(set(r["model"] for r in rows))
         for m in models:
-            s = summary[m]
-            f.write(f"| {m} | " + " | ".join(f"{s[k]:.4f}" for k in metrics) + " |\n")
+            f.write(f"### Model: {m}\n\n")
+            model_rows = [r for r in rows if r["model"] == m]
+            model_rows.sort(key=lambda r: float(r.get("image_auroc", 0.0)), reverse=True)
 
-        # --------- Global averages ---------
-        f.write("\n## Global averages (all models & classes)\n\n")
-        global_vals = {}
-        for met in metrics:
-            vals = [float(r[met]) for r in rows if met in r]
-            global_vals[met] = sum(vals) / max(1, len(vals))
-        f.write("| " + " | ".join(m.title().replace("_", " ") for m in metrics) + " |\n")
-        f.write("|" + "|".join([":---:" for _ in metrics]) + "|\n")
-        f.write("| " + " | ".join(f"{global_vals[m]:.4f}" for m in metrics) + " |\n")
+            all_fields = sorted({k for r in model_rows for k in r.keys()})
+            field_order = ["class"] + [k for k in all_fields if k not in ("model", "class")]
 
-        # --------- Best models ---------
-        f.write("\n**Best models by metric**\n\n")
-        for met, (bm, bv) in best.items():
-            f.write(f"- {met}: **{bm}** ({bv:.4f})\n")
+            f.write("| " + " | ".join(field_order) + " |\n")
+            f.write("|" + "|".join([":---:" for _ in field_order]) + "|\n")
+            for r in model_rows:
+                vals = []
+                for k in field_order:
+                    v = r.get(k, "")
+                    if isinstance(v, float):
+                        vals.append(f"{v:.4f}")
+                    else:
+                        vals.append(str(v))
+                f.write("| " + " | ".join(vals) + " |\n")
+            f.write("\n")
 
-        # --------- Optional visual references ---------
-        f.write("\n## Visual Diagnostics\n\n")
-        for r in sorted(rows, key=lambda x: (x["model"], x["class"])):
-            model, cls = r["model"], r["class"]
-            run_dir = env.RUNS_DIR / model / cls / "latest" / "eval"
-            roc_path = run_dir / "roc_curve.png"
-            pr_path = run_dir / "pr_curve.png"
-            teaser_path = run_dir / "qualitative" / "teaser.png"
-
-            f.write(f"### {model} – {cls}\n\n")
-            if roc_path.exists():
-                f.write(f"![ROC]({roc_path})\n\n")
-            if pr_path.exists():
-                f.write(f"![PR]({pr_path})\n\n")
-            if teaser_path.exists():
-                f.write(f"![Teaser]({teaser_path})\n\n")
 
     print(f"Wrote Markdown: {out_md}")
-
-
 
 
 def plot_averages(summary: Dict[str, Dict[str, float]], out_dir: Path):

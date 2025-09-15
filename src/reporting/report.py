@@ -20,7 +20,7 @@ def main():
 
     write_csv(rows, out_dir / "summary.csv")
     summ = summarize(rows)
-    write_markdown(rows, summ, out_dir / "summary.md")
+    write_markdown(rows, out_dir / "summary.md")
     plot_averages(summ, out_dir / "plots")
 
     return 0 
