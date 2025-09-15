@@ -39,14 +39,14 @@ def _parse_metrics_file(path: Path) -> MetricDict | None:
 def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str | float]]:
     """
     Collect all metrics from runs/<model>/<class>/runs/<runid>/eval/metrics.txt
-    (and also handle legacy latest/eval/metrics.txt if present).
+    and add run_id from folder name if not present.
     """
     rows: List[Dict[str, str | float]] = []
     for model in models:
         for cls in classes:
             candidates: List[Path] = []
 
-            # legacy style
+            # legacy paths
             candidates.append(env.RUNS_DIR / model / cls / "eval" / "metrics.txt")
             candidates.append(env.RUNS_DIR / model / cls / "latest" / "eval" / "metrics.txt")
 
@@ -62,9 +62,20 @@ def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str
                 mdict = _parse_metrics_file(path)
                 if mdict is not None:
                     row = {"model": model, "class": cls}
+
+                    # inject run_id from folder name if not in metrics
+                    if "run_id" not in mdict:
+                        # path: .../<model>/<class>/runs/<runid>/eval/metrics.txt
+                        try:
+                            run_id = path.parent.parent.name  # <runid>
+                        except Exception:
+                            run_id = "unknown"
+                        mdict["run_id"] = run_id
+
                     row.update(mdict)
                     rows.append(row)
     return rows
+
 
 
 
@@ -81,14 +92,24 @@ def global_summary(rows: List[Dict[str, str | float]]) -> Dict[str, float]:
 
 
 def write_csv(rows: List[Dict[str, str | float]], out_csv: Path):
+    """
+    Write all rows into a CSV file.
+    Dynamically determines fieldnames so extra fields (run_id, threshold, etc.)
+    are always included.
+    """
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["model", "class", "image_auroc", "pixel_auroc", "auprc", "pro"]
+
+    # gather all keys across all rows
+    fieldnames = sorted({k for r in rows for k in r.keys()})
+
     with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in rows:
             w.writerow(r)
+
     print(f"Wrote CSV: {out_csv}")
+
 
 
 def _avg(values: List[float]) -> float:
@@ -143,7 +164,7 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
         # ---------- 1. Best overall ----------
         f.write("## 1. Best Overall\n\n")
         if best_overall:
-            f.write(f"Best overall: **{best_overall['model']}** on **{best_overall['class']}**\n\n")
+            f.write(f"Best overall: **{best_overall['model']}** on **{best_overall['class']}**\n run ID: **{best_overall['run_id']}**\n\n")
             for m in core_metrics:
                 if m in best_overall:
                     f.write(f"- {m}: {best_overall[m]:.4f}\n")
@@ -154,7 +175,7 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
             f.write("\n")
 
         # ---------- 2. Per-class info ----------
-        f.write("## 2. Per-Class Information (sorted)\n\n")
+        f.write("## 2. Per-Class Information \n\n")
         classes = sorted(set(r["class"] for r in rows))
         for cls in classes:
             f.write(f"### Class: {cls}\n\n")
@@ -162,7 +183,8 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
             cls_rows.sort(key=lambda r: float(r.get("image_auroc", 0.0)), reverse=True)
 
             all_fields = sorted({k for r in cls_rows for k in r.keys()})
-            field_order = ["model", "class"] + [k for k in all_fields if k not in ("model", "class")]
+            # force run_id, model, class first
+            field_order = ["run_id", "model", "class"] + [k for k in all_fields if k not in ("model", "class", "run_id")]
 
             f.write("| " + " | ".join(field_order) + " |\n")
             f.write("|" + "|".join([":---:" for _ in field_order]) + "|\n")
@@ -178,7 +200,7 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
             f.write("\n")
 
         # ---------- 3. Per-model info ----------
-        f.write("## 3. Per-Model Information (sorted)\n\n")
+        f.write("## 3. Per-Model Information \n\n")
         models = sorted(set(r["model"] for r in rows))
         for m in models:
             f.write(f"### Model: {m}\n\n")
@@ -186,7 +208,7 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
             model_rows.sort(key=lambda r: float(r.get("image_auroc", 0.0)), reverse=True)
 
             all_fields = sorted({k for r in model_rows for k in r.keys()})
-            field_order = ["class"] + [k for k in all_fields if k not in ("model", "class")]
+            field_order = ["run_id", "class"] + [k for k in all_fields if k not in ("model", "class", "run_id")]
 
             f.write("| " + " | ".join(field_order) + " |\n")
             f.write("|" + "|".join([":---:" for _ in field_order]) + "|\n")
@@ -201,8 +223,8 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
                 f.write("| " + " | ".join(vals) + " |\n")
             f.write("\n")
 
-
     print(f"Wrote Markdown: {out_md}")
+
 
 
 def plot_averages(summary: Dict[str, Dict[str, float]], out_dir: Path):
