@@ -113,7 +113,7 @@ def _denormalize_imagenet(img_tensor: torch.Tensor) -> np.ndarray:
     return x.permute(1, 2, 0).numpy()
 
 
-def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_root: Path):
+def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_root: Path, run_id: str | None = None):
     # Resolve params (env acts as fallback)
     device = env.DEVICE if torch.cuda.is_available() or env.DEVICE == "cpu" else "cpu"
     bs = cfg.get("train", {}).get("batch_size", 16)
@@ -184,12 +184,17 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     visualization.plot_pr_curve(all_labels, all_scores, output_dir / "pr_curve.png")
 
     # Save metrics
-    with open(output_dir / "metrics.txt", "w") as f:
-        f.write(f"image_auroc: {img_auc:.6f}\n")
-        f.write(f"pixel_auroc: {pix_auc:.6f}\n")
-        f.write(f"auprc: {pr_auc:.6f}\n")
-        f.write(f"pro: {pro:.6f}\n")
-
+    with open(output_dir / "metrics.txt", "w") as f: 
+        f.write(f"run_id: {run_id}\n") 
+        f.write(f"image_auroc: {img_auc:.6f}\n") 
+        f.write(f"pixel_auroc: {pix_auc:.6f}\n") 
+        f.write(f"auprc: {pr_auc:.6f}\n") 
+        f.write(f"pro: {pro:.6f}\n") 
+        f.write(f"threshold: {thr:.6f}\n") 
+        f.write(f"tp: {len(idx_tp)}\n") 
+        f.write(f"fp: {len(idx_fp)}\n") 
+        f.write(f"fn: {len(idx_fn)}\n") 
+        f.write(f"tn: {len(idx_tn)}\n")
     # ---------- Qualitative overlays ----------
     # Create 4-panel visuals: image / GT / normalized map / overlay
     out_vis = output_dir / "qualitative"
@@ -304,7 +309,7 @@ def main():
     out_dir = run_root / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    evaluate(args.model, args.class_name, cfg, out_dir, run_root=run_root)
+    evaluate(args.model, args.class_name, cfg, out_dir, run_root=run_root, run_id=args.run_id)
     return 0
 
 
