@@ -205,7 +205,15 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     maps_norm = np.stack([normalize_map(m) for m in maps_np], axis=0)
 
     # Determine a reasonable operating threshold (Youden’s J)
-    thr = find_best_threshold(labels_np, scores_np)
+    # Default fallback threshold
+    thr = 0.5  
+
+    if len(scores_np) > 0 and len(labels_np) > 0:
+        try:
+            thr = find_best_threshold(labels_np, scores_np)
+        except Exception as e:
+            print(f"[WARN] Failed to compute threshold: {e}. Using default {thr}")
+
 
     # Predictions at image-level
     preds = (scores_np >= thr).astype(int)
