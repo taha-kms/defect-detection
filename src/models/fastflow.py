@@ -128,7 +128,13 @@ class FeatureExtractor(nn.Module):
         super().__init__()
         if layers is None:
             layers = ["layer2", "layer3"]
-        self.backbone = getattr(models, backbone)(pretrained=True)
+        weights_attr = f"{backbone.capitalize()}_Weights"
+        if hasattr(models, weights_attr):
+            weights = getattr(models, weights_attr).DEFAULT
+            self.backbone = getattr(models, backbone)(weights=weights)
+        else:
+            self.backbone = getattr(models, backbone)(weights=None)
+
         self.backbone.eval()
         self.layers = layers
         self._feats = {}

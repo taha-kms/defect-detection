@@ -16,7 +16,13 @@ class FeatureExtractor(nn.Module):
         if layers is None:
             layers = ["layer1", "layer2", "layer3"]
 
-        backbone_model = getattr(models, backbone)(pretrained=True)
+        weights_attr = f"{backbone.capitalize()}_Weights"
+        if hasattr(models, weights_attr):
+            weights = getattr(models, weights_attr).DEFAULT
+            backbone_model = getattr(models, backbone)(weights=weights)
+        else:
+            backbone_model = getattr(models, backbone)(weights=None)
+
         self.layers = layers
         self.feature_extractor = nn.ModuleDict()
         self.feature_extractor["layer1"] = nn.Sequential(

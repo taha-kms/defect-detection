@@ -14,7 +14,13 @@ class PatchCoreModel(nn.Module):
             layers = ["layer2", "layer3"]
 
         self.device = device
-        self.backbone = models.__dict__[backbone](pretrained=True).to(device).eval()
+        weights_attr = f"{backbone.capitalize()}_Weights"
+        if hasattr(models, weights_attr):
+            weights = getattr(models, weights_attr).DEFAULT
+            self.backbone = models.__dict__[backbone](weights=weights).to(device).eval()
+        else:
+            self.backbone = models.__dict__[backbone](weights=None).to(device).eval()
+
         self.layers = layers
         self.feature_maps = {}
         self.n_neighbors = n_neighbors
