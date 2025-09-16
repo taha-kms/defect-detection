@@ -193,13 +193,6 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     visualization.plot_roc_curve(all_labels, all_scores, output_dir / "roc_curve.png")
     visualization.plot_pr_curve(all_labels, all_scores, output_dir / "pr_curve.png")
 
-    # Save metrics
-    with open(output_dir / "metrics.txt", "w") as f:
-        f.write(f"image_auroc: {img_auc:.6f}\n")
-        f.write(f"pixel_auroc: {pix_auc:.6f}\n")
-        f.write(f"auprc: {pr_auc:.6f}\n")
-        f.write(f"pro: {pro:.6f}\n")
-        f.write(f"latency_sec: {avg_time_per_image:.6f}\n")
 
     # ---------- Qualitative overlays ----------
     # Create 4-panel visuals: image / GT / normalized map / overlay
@@ -272,6 +265,7 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
         f.write(f"fp: {len(idx_fp)}\n")
         f.write(f"fn: {len(idx_fn)}\n")
         f.write(f"tn: {len(idx_tn)}\n")
+        f.write(f"latency_sec: {avg_time_per_image:.6f}\n")
 
 
 def main():

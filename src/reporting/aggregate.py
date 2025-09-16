@@ -79,15 +79,15 @@ def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str
 
 
 
-
 def global_summary(rows: List[Dict[str, str | float]]) -> Dict[str, float]:
-    metrics = ["image_auroc", "pixel_auroc", "auprc", "pro"]
+    # average over known metrics if present
+    metrics = ["image_auroc", "pixel_auroc", "auprc", "pro", "latency_sec"]
     out = {}
     for m in metrics:
         vals = [float(r[m]) for r in rows if m in r]
-        out[m] = sum(vals) / max(1, len(vals))
+        if vals:
+            out[m] = sum(vals) / len(vals)
     return out
-
 
 
 
@@ -118,39 +118,39 @@ def _avg(values: List[float]) -> float:
 
 def summarize(rows: List[Dict[str, str | float]]) -> Dict[str, Dict[str, float]]:
     """
-    Returns per-model averages for each metric.
-    {
-      model: {image_auroc: x, pixel_auroc: y, auprc: z, pro: w}
-    }
+    Returns per-model averages for each metric (including latency_sec when present).
     """
     per_model: Dict[str, Dict[str, List[float]]] = {}
+    wanted = ["image_auroc", "pixel_auroc", "auprc", "pro", "latency_sec"]
+
     for r in rows:
         m = str(r["model"])
-        per_model.setdefault(m, {"image_auroc": [], "pixel_auroc": [], "auprc": [], "pro": []})
-        for k in ["image_auroc", "pixel_auroc", "auprc", "pro"]:
-            per_model[m][k].append(float(r[k]))
+        per_model.setdefault(m, {k: [] for k in wanted})
+        for k in wanted:
+            if k in r:  # <-- guard missing keys
+                per_model[m][k].append(float(r[k]))
+
     # average
     out: Dict[str, Dict[str, float]] = {}
     for m, md in per_model.items():
-        out[m] = {k: _avg(v) for k, v in md.items()}
+        out[m] = {k: (sum(v) / len(v) if v else float("nan")) for k, v in md.items()}
     return out
 
 
+
 def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
-    """
-    Generate a Markdown report with:
-      1. Best overall across all classes/models
-      2. Per-class metrics (sorted by image_auroc)
-      3. Per-model metrics (sorted by image_auroc)
-    """
     out_md.parent.mkdir(parents=True, exist_ok=True)
-    core_metrics = ["image_auroc", "pixel_auroc", "auprc", "pro"]
+    core_metrics_accuracy = ["image_auroc", "pixel_auroc", "auprc", "pro"]
+    extra_metrics = ["latency_sec"]
 
     # -------- Best overall (single row) --------
     best_overall = None
     best_score = -math.inf
     for r in rows:
-        score = sum(float(r[m]) for m in core_metrics if m in r) / len(core_metrics)
+        vals = [float(r[m]) for m in core_metrics_accuracy if m in r]
+        if not vals:
+            continue
+        score = sum(vals) / len(vals)
         if score > best_score:
             best_overall = r
             best_score = score
@@ -160,16 +160,20 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
         f.write(f"- Data root: `{env.DATA_DIR}`\n")
         f.write(f"- Runs root: `{env.RUNS_DIR}`\n\n")
 
-        # ---------- 1. Best overall ----------
         f.write("## 1. Best Overall\n\n")
         if best_overall:
             f.write(f"Best overall: **{best_overall['model']}** on **{best_overall['class']}**\n run ID: **{best_overall['run_id']}**\n\n")
-            for m in core_metrics:
+            # print accuracy metrics
+            for m in core_metrics_accuracy:
                 if m in best_overall:
                     f.write(f"- {m}: {best_overall[m]:.4f}\n")
-            # also dump extra fields
+            # print latency if present
+            for m in extra_metrics:
+                if m in best_overall:
+                    f.write(f"- {m}: {best_overall[m]:.4f}\n")
+            # also dump any other extra fields
             for k, v in best_overall.items():
-                if k not in ("model", "class") and k not in core_metrics:
+                if k not in ("model", "class", "run_id") and k not in (core_metrics_accuracy + extra_metrics):
                     f.write(f"- {k}: {v}\n")
             f.write("\n")
 
@@ -182,8 +186,7 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
             cls_rows.sort(key=lambda r: float(r.get("image_auroc", 0.0)), reverse=True)
 
             all_fields = sorted({k for r in cls_rows for k in r.keys()})
-            # force run_id, model, class first
-            field_order = ["run_id", "model", "class"] + [k for k in all_fields if k not in ("model", "class", "run_id")]
+            field_order = ["run_id", "model", "class", "latency_sec"] + [k for k in all_fields if k not in ("model", "class", "run_id", "latency_sec")]
 
             f.write("| " + " | ".join(field_order) + " |\n")
             f.write("|" + "|".join([":---:" for _ in field_order]) + "|\n")
@@ -194,7 +197,11 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
                     if isinstance(v, float):
                         vals.append(f"{v:.4f}")
                     else:
-                        vals.append(str(v))
+                        # try numeric rendering if it's a numeric string
+                        try:
+                            vals.append(f"{float(v):.4f}")
+                        except Exception:
+                            vals.append(str(v))
                 f.write("| " + " | ".join(vals) + " |\n")
             f.write("\n")
 
@@ -207,7 +214,7 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
             model_rows.sort(key=lambda r: float(r.get("image_auroc", 0.0)), reverse=True)
 
             all_fields = sorted({k for r in model_rows for k in r.keys()})
-            field_order = ["run_id", "class"] + [k for k in all_fields if k not in ("model", "class", "run_id")]
+            field_order = ["run_id", "class", "latency_sec"] + [k for k in all_fields if k not in ("model", "class", "run_id", "latency_sec")]
 
             f.write("| " + " | ".join(field_order) + " |\n")
             f.write("|" + "|".join([":---:" for _ in field_order]) + "|\n")
@@ -218,21 +225,23 @@ def write_markdown(rows: List[Dict[str, str | float]], out_md: Path):
                     if isinstance(v, float):
                         vals.append(f"{v:.4f}")
                     else:
-                        vals.append(str(v))
+                        try:
+                            vals.append(f"{float(v):.4f}")
+                        except Exception:
+                            vals.append(str(v))
                 f.write("| " + " | ".join(vals) + " |\n")
             f.write("\n")
 
     print(f"Wrote Markdown: {out_md}")
 
 
-
 def plot_averages(summary: Dict[str, Dict[str, float]], out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
     models = sorted(summary.keys())
-    metrics = ["image_auroc", "pixel_auroc", "auprc", "pro"]
+    metrics = ["image_auroc", "pixel_auroc", "auprc", "pro", "latency_sec"]
 
     for met in metrics:
-        vals = [summary[m][met] for m in models]
+        vals = [summary.get(m, {}).get(met, float("nan")) for m in models]  # <-- safer
         plt.figure()
         plt.bar(models, vals)
         plt.ylabel(met.replace("_", " ").title())
