@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import numpy as np
+import time
 
 import torch
 from torch.utils.data import DataLoader
@@ -145,10 +146,15 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
 
     print(f"Evaluating {model_name} on '{class_name}'")
 
+    batch_times = []
     with torch.no_grad():
         for imgs, masks, labels, _ in tqdm(test_loader, desc=f"[Eval:{model_name}] {class_name}", leave=False):
+            start = time.time()
             imgs = imgs.to(device)
             maps, scores = model.predict(imgs)
+            elapsed = time.time() - start
+            batch_times.append(elapsed / imgs.size(0))  # per-image latency
+
 
             # Collect
             all_scores.extend(scores.tolist() if hasattr(scores, "tolist") else list(scores))
@@ -162,6 +168,8 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
                 for i in range(take):
                     kept_images.append(_denormalize_imagenet(imgs[i]))
 
+
+    avg_time_per_image = float(np.mean(batch_times))
     # Concatenate
     all_scores = np.asarray(all_scores)
     all_labels = np.asarray(all_labels)
@@ -179,7 +187,7 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
     pr_auc = metrics.compute_auprc(all_masks, all_maps)
     pro = metrics.compute_pro(all_masks, all_maps)
 
-    print(f"Image AUROC: {img_auc:.4f} | Pixel AUROC: {pix_auc:.4f} | AUPRC: {pr_auc:.4f} | PRO: {pro:.4f}")
+    print(f"Image AUROC: {img_auc:.4f} | Pixel AUROC: {pix_auc:.4f} | AUPRC: {pr_auc:.4f} | PRO: {pro:.4f} | Latancy: {avg_time_per_image:.6f} sec")
 
     # Plots (image-level)
     visualization.plot_roc_curve(all_labels, all_scores, output_dir / "roc_curve.png")
@@ -191,6 +199,7 @@ def evaluate(model_name: str, class_name: str, cfg: dict, output_dir: Path, run_
         f.write(f"pixel_auroc: {pix_auc:.6f}\n")
         f.write(f"auprc: {pr_auc:.6f}\n")
         f.write(f"pro: {pro:.6f}\n")
+        f.write(f"latency_sec: {avg_time_per_image:.6f}\n")
 
     # ---------- Qualitative overlays ----------
     # Create 4-panel visuals: image / GT / normalized map / overlay
