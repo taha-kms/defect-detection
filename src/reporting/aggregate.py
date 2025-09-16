@@ -35,12 +35,7 @@ def _parse_metrics_file(path: Path) -> MetricDict | None:
     return result
 
 
-
 def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str | float]]:
-    """
-    Collect all metrics from runs/<model>/<class>/runs/<runid>/eval/metrics.txt
-    and add run_id from folder name if not present.
-    """
     rows: List[Dict[str, str | float]] = []
     for model in models:
         for cls in classes:
@@ -60,22 +55,35 @@ def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str
 
             for path in candidates:
                 mdict = _parse_metrics_file(path)
-                if mdict is not None:
-                    row = {"model": model, "class": cls}
+                if mdict is None:
+                    continue
 
-                    # inject run_id from folder name if not in metrics
-                    if "run_id" not in mdict:
-                        # path: .../<model>/<class>/runs/<runid>/eval/metrics.txt
-                        try:
-                            run_id = path.parent.parent.name  # <runid>
-                        except Exception:
-                            run_id = "unknown"
-                        mdict["run_id"] = run_id
+                # Derive clean run_id and run_path
+                # path = .../<model>/<class>/(runs/<runid>|latest|eval)/eval/metrics.txt
+                eval_dir = path.parent                    # .../eval
+                parent = eval_dir.parent                  # .../runs/<runid>  OR .../latest OR .../<class>
+                run_id = "unknown"
+                run_path = str(parent)
+                try:
+                    if parent.name == "latest":
+                        run_id = "latest"
+                    elif parent.name == "eval":
+                        # legacy: .../<class>/eval/metrics.txt
+                        run_id = "legacy"
+                    else:
+                        # likely .../runs/<runid>
+                        if parent.parent.name == "runs":
+                            run_id = parent.name          # <runid>
+                except Exception:
+                    pass
 
-                    row.update(mdict)
-                    rows.append(row)
+                row: Dict[str, str | float] = {"model": model, "class": cls}
+                row.update(mdict)          # merge parsed metrics first
+                row["run_id"] = run_id     # then force the clean run_id
+                row["run_path"] = run_path # keep full path for CSV traceability
+
+                rows.append(row)
     return rows
-
 
 
 
@@ -109,11 +117,6 @@ def write_csv(rows: List[Dict[str, str | float]], out_csv: Path):
             w.writerow(r)
 
     print(f"Wrote CSV: {out_csv}")
-
-
-
-def _avg(values: List[float]) -> float:
-    return sum(values) / max(1, len(values))
 
 
 def summarize(rows: List[Dict[str, str | float]]) -> Dict[str, Dict[str, float]]:
