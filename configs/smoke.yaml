@@ -1,0 +1,35 @@
+# Minimal, fast-to-run config for a local smoke test
+
+data:
+  # keep the default sizes so masks/overlays line up nicely
+  image_size: 96
+  center_crop: 96
+  root: data/
+
+train:
+  batch_size: 2        # tiny to keep memory low
+  num_workers: 0       # avoid multiprocessing hiccups on laptops/CI
+  epochs: 1            # short & sweet
+  lr: 0.001
+  seeds: [42]
+
+# Use a lighter backbone to speed things up.
+# (Code will use pretrained weights by default, so the first run may download them.)
+backbone:
+  name: resnet18
+  # typical layers for feature-based models
+  layers: [layer2, layer3]
+
+models:
+  # per-model tweaks to keep it lean
+  ae:
+    base_ch: 16
+  padim:
+    layers: [layer1, layer2, layer3]
+  patchcore:
+    n_neighbors: 1
+    layers: [layer2, layer3]
+  fastflow:
+    layers: [layer2, layer3]
+    num_blocks: 2
+    hidden: 128
