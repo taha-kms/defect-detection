@@ -147,6 +147,7 @@ def train(model_name: str, class_name: str, cfg: dict):
     torch.save(ckpt, save_latest_path)
 
     (output_dir / "run.json").write_text(json.dumps({
+    "run_id": run_id,
     "model": model_name,
     "class": class_name,
     "config": cfg,

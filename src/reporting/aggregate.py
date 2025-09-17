@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import csv
 import math
+import json
 
 import matplotlib.pyplot as plt
 
@@ -67,6 +68,15 @@ def collect_metrics(models: List[str], classes: List[str]) -> List[Dict[str, str
                 try:
                     if parent.name == "latest":
                         run_id = "latest"
+                        run_json = parent / "run.json"
+                        try:
+                            if run_json.exists():
+                                with open(run_json) as f:
+                                    meta = json.load(f)
+                            if "run_id" in meta:
+                                        run_id = meta["run_id"]
+                        except Exception: pass
+
                     elif parent.name == "eval":
                         # legacy: .../<class>/eval/metrics.txt
                         run_id = "legacy"
