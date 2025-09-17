@@ -1,18 +1,41 @@
-include:
-  - configs/base.yaml
-
-classes: [bottle, cable, screw, leather, tile, grid]
-models:  [ae, padim, patchcore, fastflow]
+# Robust config: same structure as smoke.yaml, but tuned for real runs
 
 data:
+  # use the repo's standard resolution so masks/overlays line up
   image_size: 256
   center_crop: 256
+  root: data/
 
 train:
+  # bigger batches & workers (adjust batch_size if you hit OOM)
   batch_size: 16
-  num_workers: 4
-  epochs: 30
+  num_workers: 8
+  # longer training for learning-based models (AE / FastFlow use this)
+  epochs: 50
   lr: 0.001
+  # multiple seeds for stability in reporting/selection
+  seeds: [1, 2, 3]
 
+# stronger backbone than smoke; pretrained weights are used by default
 backbone:
   name: resnet50
+  # typical layers for feature-based models (PaDiM/PatchCore/FastFlow)
+  layers: [layer2, layer3]
+
+models:
+  # per-model tweaks, mirroring keys used in the repo configs
+  ae:
+    # deeper AE than smoke for better capacity
+    base_ch: 64
+  padim:
+    # PaDiM usually leverages three stages
+    layers: [layer1, layer2, layer3]
+  patchcore:
+    # more neighbors makes the score less spiky on real runs
+    n_neighbors: 5
+    layers: [layer2, layer3]
+  fastflow:
+    # larger flow improves density modeling; keep same layers as backbone.l
+    layers: [layer2, layer3]
+    num_blocks: 8
+    hidden: 512
