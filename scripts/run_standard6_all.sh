@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Minimal, server-friendly robust run script
-# Same structure as your original: PREPARE → TRAIN → EVAL → REPORT
 
 DATA_DIR="${DATA_DIR:-./data}"
 RUNS_DIR="${RUNS_DIR:-./runs}"
 DEVICE="${DEVICE:-cuda}"                     # default to GPU on server; override with DEVICE=cpu if needed
-BASE_CFG="${BASE_CFG:-configs/robust.yaml}"  # use your robust config from earlier
+BASE_CFG="${BASE_CFG:-configs/standard6.yaml}"  # use your robust config from earlier
 
 MODELS=(ae padim patchcore fastflow)
 CLASSES=(bottle cable screw toothbrush transistor zipper)
