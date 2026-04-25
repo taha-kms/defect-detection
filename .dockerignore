@@ -1,0 +1,26 @@
+.git
+.gitignore
+.gitattributes
+
+.venv
+venv
+env
+
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.ipynb_checkpoints
+
+.vscode
+.idea
+.DS_Store
+
+# Local-only / large artifacts
+.env
+.env.local
+data/
+runs/
+summary/
